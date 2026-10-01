@@ -1,0 +1,60 @@
+# ==============================================================================
+# Prometheus Configuration: Cross-Boundary Telemetry Gateway
+# Attached to: cluster-1-net, cluster-2-net, cluster-3-net
+# Purpose: Scrapes metrics from isolated Clusters 1 & 2 without IP routing.
+# Exposes: /federate endpoint to Cluster 3 Primary Prometheus on cluster-3-net.
+# ==============================================================================
+
+global:
+  scrape_interval: 5s
+  scrape_timeout: 4s
+  evaluation_interval: 5s
+  external_labels:
+    telemetry_gateway: 'telemetry-gateway-core'
+    environment: 'enterprise-sim'
+
+scrape_configs:
+  # ----------------------------------------------------------------------------
+  # Cluster 1 Node Exporter Targets (cluster-1-net)
+  # ----------------------------------------------------------------------------
+  - job_name: 'cluster-1-nodes'
+    scrape_interval: 5s
+    scrape_timeout: 4s
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - 'c1-node-01:9100'
+          - 'c1-node-02:9100'
+          - 'c1-node-03:9100'
+        labels:
+          cluster: 'cluster-1'
+          datacenter: 'dc-east'
+          env: 'production'
+
+  # ----------------------------------------------------------------------------
+  # Cluster 2 Node Exporter Targets (cluster-2-net)
+  # ----------------------------------------------------------------------------
+  - job_name: 'cluster-2-nodes'
+    scrape_interval: 5s
+    scrape_timeout: 4s
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - 'c2-node-01:9100'
+          - 'c2-node-02:9100'
+          - 'c2-node-03:9100'
+        labels:
+          cluster: 'cluster-2'
+          datacenter: 'dc-west'
+          env: 'staging'
+
+  # ----------------------------------------------------------------------------
+  # Gateway Self-Monitoring
+  # ----------------------------------------------------------------------------
+  - job_name: 'telemetry-gateway-self'
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          cluster: 'gateway'
+          role: 'telemetry-bridge'

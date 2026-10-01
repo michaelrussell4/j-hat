@@ -1,0 +1,72 @@
+# ==============================================================================
+# Prometheus Configuration: Cluster 3 Primary Core Prometheus
+# Attached to: cluster-3-net
+# Purpose: Scrapes local Cluster 3 management targets & federates telemetry
+#          from Clusters 1 and 2 via telemetry-gateway:9090.
+# ==============================================================================
+
+global:
+  scrape_interval: 5s
+  scrape_timeout: 4s
+  evaluation_interval: 5s
+  external_labels:
+    site: 'cluster-3-management'
+    datacenter: 'hq-central'
+
+scrape_configs:
+  # ----------------------------------------------------------------------------
+  # Primary Prometheus Self-Monitoring
+  # ----------------------------------------------------------------------------
+  - job_name: 'cluster-3-prometheus'
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          cluster: 'cluster-3'
+          role: 'management-telemetry'
+
+  # ----------------------------------------------------------------------------
+  # Cluster 3 Simulated Management Node (cluster-3-net)
+  # ----------------------------------------------------------------------------
+  - job_name: 'cluster-3-nodes'
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['c3-node-01:9100']
+        labels:
+          cluster: 'cluster-3'
+          datacenter: 'hq-central'
+          env: 'management'
+
+  # ----------------------------------------------------------------------------
+  # Nested Orchestrator Workload (Inside DinD on cluster-3-net:8000)
+  # ----------------------------------------------------------------------------
+  - job_name: 'cluster-3-dind-workload'
+    scrape_interval: 5s
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['cluster-3-dind:8000']
+        labels:
+          cluster: 'cluster-3'
+          role: 'nested-microservice'
+          tier: 'orchestrated-dind'
+
+  # ----------------------------------------------------------------------------
+  # Cross-Boundary Telemetry Federation from Gateway
+  # Collects metrics from Clusters 1 and 2 without direct network access!
+  # ----------------------------------------------------------------------------
+  - job_name: 'federate-gateway-clusters-1-and-2'
+    scrape_interval: 5s
+    scrape_timeout: 4s
+    honor_labels: true
+    metrics_path: '/federate'
+    params:
+      'match[]':
+        - '{job=~"cluster-.*"}'
+        - '{__name__=~"node_.*"}'
+        - '{__name__=~"cluster_node_.*"}'
+        - '{__name__=~"up"}'
+    static_configs:
+      - targets: ['telemetry-gateway:9090']
+        labels:
+          federated_via: 'telemetry-gateway'
+          federation_source: 'cluster-cross-boundary'

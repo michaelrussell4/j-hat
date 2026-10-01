@@ -1,0 +1,55 @@
+# ==============================================================================
+# Nested Workload Compose (Executed within Cluster 3 Docker-in-Docker)
+# Represents an enterprise VM running its own local container fleet.
+# ==============================================================================
+services:
+  micro-api:
+    build:
+      context: ./micro-api
+      dockerfile: Dockerfile
+    container_name: nested-micro-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - REDIS_HOST=redis
+      - POSTGRES_HOST=postgres
+      - POSTGRES_USER=appuser
+      - POSTGRES_PASSWORD=appsecret
+      - POSTGRES_DB=appdb
+    depends_on:
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.5'
+
+  redis:
+    image: redis:7-alpine
+    container_name: nested-redis
+    restart: unless-stopped
+    command: redis-server --save "" --appendonly no
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: '0.25'
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: nested-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: appdb
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: appsecret
+    deploy:
+      resources:
+        limits:
+          memory: 192M
+          cpus: '0.5'

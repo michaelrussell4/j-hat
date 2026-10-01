@@ -1,0 +1,369 @@
+# ==============================================================================
+# Multi-Cluster Enterprise Infrastructure Simulation
+# Architecture:
+#   - cluster-1-net: Simulated Production Nodes (c1-node-01..03)
+#   - cluster-2-net: Simulated Staging Nodes (c2-node-01..03)
+#   - Cross-boundary: Telemetry Gateway (bridges scraping, NO general IP routing)
+#   - cluster-3-net: Management, Telemetry (Prometheus + Grafana),
+#                    DinD Nested Orchestrator, and Local AI (Ollama + Open WebUI)
+# ==============================================================================
+
+services:
+  # ============================================================================
+  # CLUSTER 1: Simulated Compute Nodes (Isolated Network: cluster-1-net)
+  # ============================================================================
+  c1-node-01:
+    build:
+      context: ./images/simulated-node
+      dockerfile: Dockerfile
+    container_name: c1-node-01
+    hostname: c1-node-01
+    restart: unless-stopped
+    networks:
+      cluster-1-net:
+        ipv4_address: 172.28.1.11
+    environment:
+      - NODE_NAME=c1-node-01
+      - CLUSTER_ID=cluster-1
+      - DATACENTER=dc-east
+      - NODE_ROLE=worker-compute
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: '0.25'
+
+  c1-node-02:
+    build:
+      context: ./images/simulated-node
+      dockerfile: Dockerfile
+    container_name: c1-node-02
+    hostname: c1-node-02
+    restart: unless-stopped
+    networks:
+      cluster-1-net:
+        ipv4_address: 172.28.1.12
+    environment:
+      - NODE_NAME=c1-node-02
+      - CLUSTER_ID=cluster-1
+      - DATACENTER=dc-east
+      - NODE_ROLE=worker-compute
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: '0.25'
+
+  c1-node-03:
+    build:
+      context: ./images/simulated-node
+      dockerfile: Dockerfile
+    container_name: c1-node-03
+    hostname: c1-node-03
+    restart: unless-stopped
+    networks:
+      cluster-1-net:
+        ipv4_address: 172.28.1.13
+    environment:
+      - NODE_NAME=c1-node-03
+      - CLUSTER_ID=cluster-1
+      - DATACENTER=dc-east
+      - NODE_ROLE=worker-storage
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: '0.25'
+
+  # ============================================================================
+  # CLUSTER 2: Simulated Compute Nodes (Isolated Network: cluster-2-net)
+  # ============================================================================
+  c2-node-01:
+    build:
+      context: ./images/simulated-node
+      dockerfile: Dockerfile
+    container_name: c2-node-01
+    hostname: c2-node-01
+    restart: unless-stopped
+    networks:
+      cluster-2-net:
+        ipv4_address: 172.28.2.11
+    environment:
+      - NODE_NAME=c2-node-01
+      - CLUSTER_ID=cluster-2
+      - DATACENTER=dc-west
+      - NODE_ROLE=worker-compute
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: '0.25'
+
+  c2-node-02:
+    build:
+      context: ./images/simulated-node
+      dockerfile: Dockerfile
+    container_name: c2-node-02
+    hostname: c2-node-02
+    restart: unless-stopped
+    networks:
+      cluster-2-net:
+        ipv4_address: 172.28.2.12
+    environment:
+      - NODE_NAME=c2-node-02
+      - CLUSTER_ID=cluster-2
+      - DATACENTER=dc-west
+      - NODE_ROLE=worker-compute
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: '0.25'
+
+  c2-node-03:
+    build:
+      context: ./images/simulated-node
+      dockerfile: Dockerfile
+    container_name: c2-node-03
+    hostname: c2-node-03
+    restart: unless-stopped
+    networks:
+      cluster-2-net:
+        ipv4_address: 172.28.2.13
+    environment:
+      - NODE_NAME=c2-node-03
+      - CLUSTER_ID=cluster-2
+      - DATACENTER=dc-west
+      - NODE_ROLE=worker-storage
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: '0.25'
+
+  # ============================================================================
+  # CROSS-BOUNDARY TELEMETRY GATEWAY
+  # Multi-homed on cluster-1-net, cluster-2-net, cluster-3-net.
+  # Scrapes C1 and C2 metrics and exposes /federate to C3 Primary Prometheus.
+  # ============================================================================
+  telemetry-gateway:
+    image: prom/prometheus:v2.54.1
+    container_name: telemetry-gateway
+    hostname: telemetry-gateway
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=2h'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./configs/prometheus/gateway-prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - gateway_prom_data:/prometheus
+    networks:
+      cluster-1-net:
+        ipv4_address: 172.28.1.254
+      cluster-2-net:
+        ipv4_address: 172.28.2.254
+      cluster-3-net:
+        ipv4_address: 172.28.3.254
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+          cpus: '0.5'
+
+  # ============================================================================
+  # CLUSTER 3: Management, Telemetry, Nested Orchestration & AI Inference
+  # ============================================================================
+
+  # Cluster 3 Simulated Management Node
+  c3-node-01:
+    build:
+      context: ./images/simulated-node
+      dockerfile: Dockerfile
+    container_name: c3-node-01
+    hostname: c3-node-01
+    restart: unless-stopped
+    networks:
+      cluster-3-net:
+        ipv4_address: 172.28.3.11
+    environment:
+      - NODE_NAME=c3-node-01
+      - CLUSTER_ID=cluster-3
+      - DATACENTER=hq-central
+      - NODE_ROLE=management-bastion
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: '0.25'
+
+  # Cluster 3 Nested Orchestrator (Docker-in-Docker)
+  cluster-3-dind:
+    image: docker:27.3-dind
+    container_name: cluster-3-dind
+    hostname: cluster-3-dind
+    privileged: true
+    restart: unless-stopped
+    environment:
+      - DOCKER_TLS_CERTDIR=
+    volumes:
+      - ./configs/dind:/dind-workloads:ro
+      - ./configs/dind/entrypoint-dind.sh:/entrypoint-dind.sh:ro
+      - dind_storage:/var/lib/docker
+    entrypoint: ["/bin/sh", "/entrypoint-dind.sh"]
+    networks:
+      cluster-3-net:
+        ipv4_address: 172.28.3.20
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
+          cpus: '1.5'
+
+  # Cluster 3 Primary Prometheus (Federates from Gateway + Local Targets)
+  cluster-3-prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: cluster-3-prometheus
+    hostname: cluster-3-prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=24h'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./configs/prometheus/primary-prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - primary_prom_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      cluster-3-net:
+        ipv4_address: 172.28.3.90
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.75'
+    depends_on:
+      - telemetry-gateway
+
+  # Cluster 3 Grafana (Pre-provisioned Dashboards & Prometheus Datasource)
+  cluster-3-grafana:
+    image: grafana/grafana:11.2.0
+    container_name: cluster-3-grafana
+    hostname: cluster-3-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/enterprise-infrastructure-overview.json
+    volumes:
+      - ./configs/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./configs/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./configs/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    networks:
+      cluster-3-net:
+        ipv4_address: 172.28.3.30
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+          cpus: '0.5'
+    depends_on:
+      - cluster-3-prometheus
+
+  # Cluster 3 Ollama Local AI Inference Server
+  cluster-3-ollama:
+    image: ollama/ollama:latest
+    container_name: cluster-3-ollama
+    hostname: cluster-3-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h
+      - OLLAMA_NUM_PARALLEL=1
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      cluster-3-net:
+        ipv4_address: 172.28.3.40
+    deploy:
+      resources:
+        limits:
+          memory: 3072M
+          cpus: '2.0'
+
+  # Cluster 3 Open WebUI Frontend for Ollama
+  cluster-3-open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: cluster-3-open-webui
+    hostname: cluster-3-open-webui
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - OLLAMA_BASE_URL=http://cluster-3-ollama:11434
+      - WEBUI_AUTH=False
+      - DATA_DIR=/app/backend/data
+    volumes:
+      - open_webui_data:/app/backend/data
+    networks:
+      cluster-3-net:
+        ipv4_address: 172.28.3.80
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+          cpus: '1.0'
+    depends_on:
+      - cluster-3-ollama
+
+# ==============================================================================
+# ISOLATED BRIDGED ENTERPRISE NETWORKS
+# ============================================================================
+networks:
+  cluster-1-net:
+    name: cluster-1-net
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.28.1.0/24
+          gateway: 172.28.1.1
+
+  cluster-2-net:
+    name: cluster-2-net
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.28.2.0/24
+          gateway: 172.28.2.1
+
+  cluster-3-net:
+    name: cluster-3-net
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.28.3.0/24
+          gateway: 172.28.3.1
+
+# ==============================================================================
+# PERSISTENT STORAGE VOLUMES
+# ============================================================================
+volumes:
+  gateway_prom_data:
+  primary_prom_data:
+  grafana_data:
+  dind_storage:
+  ollama_data:
+  open_webui_data:
